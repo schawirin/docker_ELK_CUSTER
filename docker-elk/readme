@@ -1,0 +1,20 @@
+This project was developed to build a docker-compose with multiple elasticsearch cluster, Logstash, Metricbeat, filebeat and Kibana. 
+The Goal is to configure the lifecycle to parse the data over the elasticsearch cluster (HOT, WARM AND COLD)
+
+
+DEPLOY 
+To deploy the stak is just type: docker-compose up -d  
+and acess in the browser  youripadress:5601
+
+How configure the lifecycle 
+
+https://www.elastic.co/guide/en/elasticsearch/reference/master/set-up-lifecycle-policy.html#:~:text=To%20create%20lifecycle%20policies%20through,policy%20to%20the%20Elasticsearch%20cluster.
+
+
+
+Machine Resources. 
+STORAGE : 2 TB SSD 
+MEMORY: 64 GB RAM DD4 2400 
+CPU: XEON SILVER 12 CORE 24 virtualization
+OS: CENTOS 7
+
