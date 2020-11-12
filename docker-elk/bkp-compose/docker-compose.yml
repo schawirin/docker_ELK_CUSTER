@@ -1,0 +1,151 @@
+version: '3.2'
+
+services:
+elasticsearch-hot:
+    container_name: elasticsearch-hot
+     image: docker.elastic.co/elasticsearch/elasticsearch:7.9.3
+    environment:
+      - cluster.name=metrics-cluster
+      - node.name=elasticsearch-hot
+      - node.attr.size=hot
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - discovery.seed_hosts=elasticsearch-warm,elasticsearch-cold
+      - cluster.initial_master_nodes=elasticsearch-hot,elasticsearch-warm,elasticsearch-cold
+      - xpack.monitoring.collection.enabled=true
+      - path.repo=/usr/share/elasticsearch/backup
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    mem_limit: 1g
+    volumes:
+      - elasticsearch_data_hot:/usr/share/elasticsearch/data
+      - elasticsearch_backup:/usr/share/elasticsearch/backup
+    ports:
+      - 9200:9200
+    networks:
+      - elk
+
+  elasticsearch-warm:
+    container_name: elasticsearch-warm
+     image: docker.elastic.co/elasticsearch/elasticsearch:7.9.3
+    environment:
+      - cluster.name=metrics-cluster
+      - node.name=elasticsearch-warm
+      - node.attr.size=warm
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - discovery.seed_hosts=elasticsearch-hot,elasticsearch-cold
+      - cluster.initial_master_nodes=elasticsearch-hot,elasticsearch-warm,elasticsearch-cold
+      - xpack.monitoring.collection.enabled=true
+      - path.repo=/usr/share/elasticsearch/backup
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    mem_limit: 1g
+    volumes:
+      - elasticsearch_data_warm:/usr/share/elasticsearch/data
+      - elasticsearch_backup:/usr/share/elasticsearch/backup
+    ports:
+      - 9201:9200
+    networks:
+      - elk
+
+  elasticsearch-cold:
+    container_name: elasticsearch-cold
+   image: docker.elastic.co/elasticsearch/elasticsearch:7.9.3
+    environment:
+      - cluster.name=metrics-cluster
+      - node.name=elasticsearch-cold
+      - node.attr.size=cold
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - discovery.seed_hosts=elasticsearch-hot,elasticsearch-warm
+      - cluster.initial_master_nodes=elasticsearch-hot,elasticsearch-warm,elasticsearch-cold
+      - xpack.monitoring.collection.enabled=true
+      - path.repo=/usr/share/elasticsearch/backup
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    mem_limit: 1g
+    volumes:
+      - elasticsearch_data_cold:/usr/share/elasticsearch/data
+      - elasticsearch_backup:/usr/share/elasticsearch/backup
+    ports:
+      - 9202:9200
+    networks:
+      - elk
+
+
+  logstash:
+    build:
+      context: logstash/
+      args:
+        ELK_VERSION: $ELK_VERSION
+    volumes:
+      - type: bind
+        source: ./logstash/config/logstash.yml
+        target: /usr/share/logstash/config/logstash.yml
+        read_only: true
+      - type: bind
+        source: ./logstash/pipeline
+        target: /usr/share/logstash/pipeline
+        read_only: true
+    ports:
+      - "5044:5044"
+      - "5000:5000/tcp"
+      - "5000:5000/udp"
+      - "9600:9600"
+      - "5014:5014"
+      - "5014:5014/udp"
+      - "514:514"
+      - "514:514/udp"
+    environment:
+      LS_JAVA_OPTS: "-Xms10G -Xmx10G"
+    networks:
+      - elk
+    links:
+     - elasticsearch-hot
+     - elasticsearch-warm
+     - elasticsearch-cold
+    depends_on:
+      - elasticsearch-hot
+      - elasticsearch-warm
+      - elasticsearch-cold
+
+  kibana:
+    build:
+      context: kibana/
+      args:
+        ELK_VERSION: $ELK_VERSION
+    volumes:
+      - type: bind
+        source: ./kibana/config/kibana.yml
+        target: /usr/share/kibana/config/kibana.yml
+        read_only: true
+    ports:
+      - "5601:5601"
+#environment:
+ #     ELASTICSEARCH_URL: http://es01:9200
+ #     ELASTICSEARCH_HOSTS: http://es01:9200
+    networks:
+      - elk
+    depends_on:
+      - elasticsearch-hot
+      - elasticsearch-warm
+     - elasticsearch-cold
+
+networks:
+  elk:
+    driver: bridge
+
+volumes:
+        data01:
+         driver: local
+        data02:
+         driver: local
+        data03:
+         driver: local

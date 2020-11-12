@@ -1,0 +1,224 @@
+version: '3.2'
+
+services:
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.9.3
+    container_name: es01
+    environment:
+      - node.name=es01
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=es02,es03
+      - cluster.initial_master_nodes=es01,es02,es03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms20G -Xmx20G"
+      - node.attr.size=hot
+      - xpack.monitoring.collection.enabled=true
+      - path.repo=/usr/share/elasticsearch/backup
+
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data01:/usr/share/elasticsearch/data
+      - bkp:/usr/share/elasticsearch/backup
+     # - ./elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+    ports:
+      - 9200:9200
+    networks:
+      - elk
+
+  es02:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.9.3
+    container_name: es02
+    environment:
+      - node.name=es02
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=es01,es03
+      - cluster.initial_master_nodes=es01,es02,es03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms12G -Xmx12G"
+      - node.attr.size=warm
+      - xpack.monitoring.collection.enabled=true
+      - path.repo=/usr/share/elasticsearch/backup
+
+      
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data02:/usr/share/elasticsearch/data
+    #  - bkp:/usr/share/elasticsearch/backup
+    ports:
+      - 9201:9201
+    networks:
+      - elk
+
+  es03:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.9.3
+    container_name: es03
+    environment:
+      - node.name=es03
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=es01,es02
+      - cluster.initial_master_nodes=es01,es02,es03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms12G -Xmx12G"
+      - node.attr.size=cold
+      - xpack.monitoring.collection.enabled=true
+      - path.repo=/usr/share/elasticsearch/backup
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data03:/usr/share/elasticsearch/data
+    ports:
+      - 9202:9202
+    networks:
+      - elk
+
+  logstash:
+    build:
+      context: logstash/
+      args:
+        ELK_VERSION: $ELK_VERSION
+    volumes:
+      - type: bind
+        source: ./logstash/config/logstash.yml
+        target: /usr/share/logstash/config/logstash.yml
+        read_only: true
+      - type: bind
+        source: ./logstash/pipeline
+        target: /usr/share/logstash/pipeline
+        read_only: true
+    ports:
+      - "5044:5044"
+      - "5000:5000/tcp"
+      - "5000:5000/udp"
+      - "9600:9600"
+      - "5014:5014"
+      - "5014:5014/udp"
+      - "514:514"
+      - "514:514/udp"
+      - "12201:12201"
+      - "12202:12202"
+      - "5555:5555"
+    environment:
+      LS_JAVA_OPTS: "-Xms10G -Xmx10G"
+    networks:
+      - elk
+    links:
+     - es01
+     - es02
+     - es03
+    depends_on:
+      - es01
+      - es02
+      - es03
+
+  kibana:
+    build:
+      context: kibana/
+      args:
+        ELK_VERSION: $ELK_VERSION
+    volumes:
+      - type: bind
+        source: ./kibana/config/kibana.yml
+        target: /usr/share/kibana/config/kibana.yml
+        read_only: true
+    ports:
+      - "5601:5601"
+#environment:
+ #     ELASTICSEARCH_URL: http://es01:9200
+ #     ELASTICSEARCH_HOSTS: http://es01:9200
+    networks:
+      - elk
+    depends_on:
+      - es01
+      - es02
+      - es03
+
+ # How to Tune Elastic Beats Performance: A Practical Example with Batch Size, Worker Count, and More
+  # https://www.elastic.co/blog/how-to-tune-elastic-beats-performance-a-practical-example-with-batch-size-worker-count-and-more?blade=tw&hulk=social
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:$ELK_VERSION
+    # https://github.com/docker/swarmkit/issues/1951
+    hostname: filebeat
+    # Need to override user so we can access the log files, and docker.sock
+    user: root
+    networks:
+      - elk
+    configs:
+      - source: fb_config
+        target: /usr/share/filebeat/filebeat.yml
+   # volumes:
+      - filebeat:/usr/share/filebeat/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      # This is needed for filebeat to load container log path as specified in filebeat.yml
+      - /var/lib/docker/containers/:/var/lib/docker/containers/:ro
+
+      # # This is needed for filebeat to load jenkins build log path as specified in filebeat.yml
+      # - /var/lib/docker/volumes/jenkins_home/_data/jobs/:/var/lib/docker/volumes/jenkins_home/_data/jobs/:ro
+
+      # This is needed for filebeat to load logs for system and auth modules
+      - /var/log/:/var/log/:ro
+      # This is needed for filebeat to load logs for auditd module. you might have to install audit system
+      # on ubuntu first (sudo apt-get install -y auditd audispd-plugins)
+      - /var/log/audit/:/var/log/audit/:ro
+    environment:
+      - ELASTICSEARCH_HOST=es01
+      - KIBANA_HOST=kibana
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=changeme
+    # disable strict permission checks
+    command: ["--strict.perms=false"]
+    deploy:
+      mode: global
+networks:
+ - elk
+
+volumes:
+  filebeat:
+
+#configs:
+#  fb_config:
+#    file: $PWD/elk/beats/filebeat/config/filebeat.yml
+
+  metricbeat:
+    container_name: metricbeat
+    hostname: metricbeat
+    user: root
+    image: docker.elastic.co/beats/metricbeat:$ELK_VERSION
+    volumes:
+     #- ./metricbeat/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      - ./metricbeat/modules.d/:/usr/share/metricbeat/modules.d/:ro
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+     #- /var/run/docker.sock:/var/run/docker.sock
+     #- /:/hostfs:ro
+    command: metricbeat -e -system.hostfs=/hostfs -strict.perms=false
+    depends_on:
+      - es01
+      - es02
+      - es03
+      - kibana
+    networks:
+      - elk
+#    restart: on-failure
+
+
+networks:
+  elk:
+    driver: bridge
+
+volumes:
+        data01:
+         driver: local
+        data02:
+         driver: local
+        data03:
+         driver: local
+        bkp:
+          driver: local
